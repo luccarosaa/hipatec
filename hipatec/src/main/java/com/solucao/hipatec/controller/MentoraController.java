@@ -6,8 +6,9 @@ import com.solucao.hipatec.service.MentoraService;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
-@CrossOrigin(origins = "http://localhost:8100")
+@CrossOrigin(originPatterns = {"http://localhost:*", "http://127.0.0.1:*", "http://192.168.*:*"})
 @RestController
 @RequestMapping("/mentoras")
 public class MentoraController {
@@ -30,10 +31,17 @@ public class MentoraController {
 
     // LOGIN
     @PostMapping("/login")
-    public Integer login(
+    public Map<String, Object> login(
             @RequestParam String email,
             @RequestParam String senha
     ) {
-        return service.login(email, senha);
+        Integer userId = service.login(email, senha);
+        boolean authenticated = userId != null && userId > 0;
+
+        return Map.of(
+                "authenticated", authenticated,
+                "userId", userId,
+                "message", authenticated ? "Login realizado com sucesso." : "Email ou senha inválidos."
+        );
     }
 }
