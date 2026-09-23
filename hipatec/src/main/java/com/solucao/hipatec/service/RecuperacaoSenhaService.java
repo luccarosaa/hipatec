@@ -18,7 +18,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.mail.MailException;
 import org.springframework.mail.SimpleMailMessage;
-import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -31,7 +30,7 @@ public class RecuperacaoSenhaService {
     private final EstudanteRepository estudantes;
     private final MentoraRepository mentoras;
     private final RecuperacaoSenhaRepository recuperacoes;
-    private final JavaMailSender mail;
+    private final EmailService mail;
     private final BCryptPasswordEncoder encoder;
     private final SecureRandom random = new SecureRandom();
 
@@ -43,22 +42,23 @@ public class RecuperacaoSenhaService {
 
     @Async("recuperacaoSenhaExecutor")
     @Transactional
-    public void solicitar(String perfil, String email) {
+    public void solicitar(String email) {
+        var contasEstudantes = estudantes.findByEmailIgnoreCase(email.trim());
+        var contasMentoras = mentoras.findByEmailIgnoreCase(email.trim());
+        // Até o cadastro garantir unicidade global, não escolher uma conta ambígua.
+        if (contasEstudantes.size() + contasMentoras.size() != 1) return;
+
+        String perfil;
         Integer contaId;
         String destinatario;
-        if ("estudantes".equals(perfil)) {
-            var contas = estudantes.findByEmailIgnoreCase(email.trim());
-            // Cadastros legados podem conter e-mails repetidos. Não escolher uma conta arbitrária.
-            if (contas.size() != 1) return;
-            contaId = contas.get(0).getId();
-            destinatario = contas.get(0).getEmail();
-        } else if ("mentoras".equals(perfil)) {
-            var contas = mentoras.findByEmailIgnoreCase(email.trim());
-            if (contas.size() != 1) return;
-            contaId = contas.get(0).getId();
-            destinatario = contas.get(0).getEmail();
+        if (!contasEstudantes.isEmpty()) {
+            perfil = "estudantes";
+            contaId = contasEstudantes.get(0).getId();
+            destinatario = contasEstudantes.get(0).getEmail();
         } else {
-            return;
+            perfil = "mentoras";
+            contaId = contasMentoras.get(0).getId();
+            destinatario = contasMentoras.get(0).getEmail();
         }
 
         var agora = Instant.now();
@@ -91,8 +91,8 @@ public class RecuperacaoSenhaService {
                 + "Abra este link, válido por 30 minutos e para um único uso:\n"
                 + resetUrl + "#token=" + token
                 + "\n\nSe você não solicitou a alteração, ignore este e-mail. Sua senha continua a mesma.");
-        // Uma falha no SMTP desfaz a troca do token, preservando o link anterior.
-        mail.send(mensagem);
+        // Uma falha no provedor desfaz a troca do token, preservando o link anterior.
+        mail.send(mensagem, resetUrl + "#token=" + token);
     }
 
     @Transactional

@@ -59,3 +59,11 @@ dependencies {
 tasks.named('test') {
 	useJUnitPlatform()
 }
+
+tasks.register('recuperacaoLocal', JavaExec) {
+	group = 'application'
+	description = 'Login e recuperação reais com H2 descartável e Mailpit local.'
+	dependsOn testClasses
+	classpath = sourceSets.test.runtimeClasspath
+	mainClass = 'com.solucao.hipatec.RecuperacaoLocalApplication'
+}

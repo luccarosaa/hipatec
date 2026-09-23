@@ -59,7 +59,7 @@ class RecuperacaoSenhaTests {
     @EnableAutoConfiguration
     @EntityScan("com.solucao.hipatec.model")
     @EnableJpaRepositories("com.solucao.hipatec.repository")
-    @Import({RecuperacaoSenhaConfig.class, RecuperacaoSenhaService.class,
+    @Import({RecuperacaoSenhaConfig.class, RecuperacaoSenhaService.class, EmailService.class,
             EstudanteService.class, MentoraService.class})
     static class Config {
         @Bean JavaMailSender mail() { return mock(JavaMailSender.class); }
@@ -111,8 +111,8 @@ class RecuperacaoSenhaTests {
         }
     }
 
-    private String solicitar(String perfil, String email) throws Exception {
-        service.solicitar(perfil, email);
+    private String solicitar(String email) throws Exception {
+        service.solicitar(email);
         aguardarProcessamento();
         
         var mensagem = ArgumentCaptor.forClass(SimpleMailMessage.class);
@@ -124,7 +124,7 @@ class RecuperacaoSenhaTests {
 
     @Test
     void redefineEstudanteEImpedeReusoESenhaAntiga() throws Exception {
-        String token = solicitar("estudantes", "ESTUDANTE@example.test");
+        String token = solicitar("ESTUDANTE@example.test");
         assertNotEquals(token, tokens.findAll().get(0).getTokenHash());
         assertEquals(64, tokens.findAll().get(0).getTokenHash().length());
         assertEquals("senha-legada", estudantes.findAll().get(0).getSenha());
@@ -141,7 +141,7 @@ class RecuperacaoSenhaTests {
 
     @Test
     void redefineMentoraSemAlterarEstudante() throws Exception {
-        String token = solicitar("mentoras", "mentora@example.test");
+        String token = solicitar("mentora@example.test");
         
         service.redefinir(token, "NovaSenha123!");
         
@@ -153,7 +153,7 @@ class RecuperacaoSenhaTests {
 
     @Test
     void rejeitaLinkExpiradoOuAleatorioSemAlterarSenha() throws Exception {
-        String token = solicitar("estudantes", "estudante@example.test");
+        String token = solicitar("estudante@example.test");
         
         var recuperacao = tokens.findAll().get(0);
         
@@ -167,9 +167,9 @@ class RecuperacaoSenhaTests {
 
     @Test
     void limitaReenvioESubstituiLinkAnterior() throws Exception {
-        String anterior = solicitar("estudantes", "estudante@example.test");
+        String anterior = solicitar("estudante@example.test");
         
-        service.solicitar("estudantes", "estudante@example.test");
+        service.solicitar("estudante@example.test");
         
         aguardarProcessamento();
         verify(mail, times(1)).send(any(SimpleMailMessage.class));
@@ -179,7 +179,7 @@ class RecuperacaoSenhaTests {
         recuperacao.setCriadoEm(Instant.now().minusSeconds(61));
         tokens.save(recuperacao);
         
-        String novo = solicitar("estudantes", "estudante@example.test");
+        String novo = solicitar("estudante@example.test");
         
         assertNotEquals(anterior, novo);
         assertThrows(ResponseStatusException.class, () -> service.redefinir(anterior, "NovaSenha123!"));
@@ -189,7 +189,7 @@ class RecuperacaoSenhaTests {
 
     @Test
     void falhaNoEnvioPreservaLinkAnterior() throws Exception {
-        String anterior = solicitar("estudantes", "estudante@example.test");
+        String anterior = solicitar("estudante@example.test");
         
         var recuperacao = tokens.findAll().get(0);
         
@@ -198,7 +198,7 @@ class RecuperacaoSenhaTests {
         
         doThrow(new MailSendException("SMTP local indisponível")).when(mail).send(any(SimpleMailMessage.class));
         
-        service.solicitar("estudantes", "estudante@example.test");
+        service.solicitar("estudante@example.test");
         
         aguardarProcessamento();
         // O aviso de confirmação também falhará; a senha ainda deve ser alterada.
@@ -210,7 +210,7 @@ class RecuperacaoSenhaTests {
     void respostasIguaisParaContaConhecidaEDesconhecida() throws Exception {
         for (String email : List.of("estudante@example.test", "desconhecida@example.test")) {
             var resposta = mvc.perform(post("/auth/recuperacao-senha").contentType("application/json")
-                    .content("{\"perfil\":\"estudantes\",\"email\":\"" + email + "\"}"))
+                    .content("{\"email\":\"" + email + "\"}"))
                     .andExpect(status().isAccepted()).andReturn().getResponse();
             assertEquals("", resposta.getContentAsString());
         }
@@ -224,7 +224,7 @@ class RecuperacaoSenhaTests {
         
         duplicada.setEmail("estudante@example.test");
         estudantes.save(duplicada);
-        service.solicitar("estudantes", "estudante@example.test");
+        service.solicitar("estudante@example.test");
         
         aguardarProcessamento();
         verifyNoInteractions(mail);
@@ -232,24 +232,39 @@ class RecuperacaoSenhaTests {
     }
 
     @Test
+    void naoEscolheContaQuandoEmailExisteNosDoisPerfis() throws Exception {
+        var mentora = mentoras.findAll().get(0);
+        mentora.setEmail("ESTUDANTE@example.test");
+        mentoras.save(mentora);
+        mvc.perform(post("/auth/recuperacao-senha").contentType("application/json")
+                .content("{\"email\":\"estudante@example.test\"}"))
+                .andExpect(status().isAccepted());
+        aguardarProcessamento();
+        verifyNoInteractions(mail);
+        assertEquals(0, tokens.count());
+        assertEquals("senha-legada", estudantes.findAll().get(0).getSenha());
+        assertEquals("senha-legada", mentoras.findAll().get(0).getSenha());
+    }
+
+    @Test
     void validaEntradaELimitaTentativasHttp() throws Exception {
         mvc.perform(post("/auth/recuperacao-senha").contentType("application/json")
-                .content("{\"perfil\":\"admin\",\"email\":\"inválido\"}"))
+                .content("{\"email\":\"inválido\"}"))
                 .andExpect(status().isBadRequest());
         for (int i = 0; i < 5; i++) {
             mvc.perform(post("/auth/recuperacao-senha").contentType("application/json")
-                    .content("{\"perfil\":\"estudantes\",\"email\":\"nao-existe@example.test\"}"))
+                    .content("{\"email\":\"nao-existe@example.test\"}"))
                     .andExpect(status().isAccepted());
         }
         mvc.perform(post("/auth/recuperacao-senha").contentType("application/json")
-                .content("{\"perfil\":\"estudantes\",\"email\":\"nao-existe@example.test\"}"))
+                .content("{\"email\":\"nao-existe@example.test\"}"))
                 .andExpect(status().isTooManyRequests());
         aguardarProcessamento();
     }
 
     @Test
     void redefineViaHttpSemDevolverSenhaOuToken() throws Exception {
-        String token = solicitar("estudantes", "estudante@example.test");
+        String token = solicitar("estudante@example.test");
 
         mvc.perform(post("/auth/redefinir-senha").contentType("application/json")
                 .content("{\"token\":\"" + token + "\",\"senha\":\"curta\"}"))
@@ -268,7 +283,7 @@ class RecuperacaoSenhaTests {
 
     @Test
     void naoConsomeTokenQuandoSenhaNaoAtendeLimites() throws Exception {
-        String token = solicitar("estudantes", "estudante@example.test");
+        String token = solicitar("estudante@example.test");
         
         for (String senha : List.of("curta", " ".repeat(8), "á".repeat(40))) {
             assertThrows(ResponseStatusException.class, () -> service.redefinir(token, senha));
@@ -280,7 +295,7 @@ class RecuperacaoSenhaTests {
 
     @Test
     void somenteUmaTrocaConcorrentePodeUsarOMesmoLink() throws Exception {
-        String token = solicitar("estudantes", "estudante@example.test");
+        String token = solicitar("estudante@example.test");
         
         var inicio = new CountDownLatch(1);
         var executor = Executors.newFixedThreadPool(2);
@@ -335,13 +350,14 @@ class RecuperacaoSenhaTests {
         smtp.setHost("127.0.0.1");
         smtp.setPort(Integer.parseInt(System.getenv("HIPATEC_TEST_SMTP_PORT")));
         
-        var local = new RecuperacaoSenhaService(estudantes, mentoras, tokens, smtp, encoder);
+        var email = new EmailService(smtp, org.springframework.web.client.RestClient.builder(), "smtp", "", "");
+        var local = new RecuperacaoSenhaService(estudantes, mentoras, tokens, email, encoder);
         
         ReflectionTestUtils.setField(local, "resetUrl", "http://localhost:8100/redefinir-senha");
         ReflectionTestUtils.setField(local, "remetente", "teste@hipatec.local");
         
         new TransactionTemplate(transactionManager).executeWithoutResult(status ->
-                local.solicitar("estudantes", "estudante@example.test"));
+                local.solicitar("estudante@example.test"));
         assertEquals(1, tokens.count());
     }
 }

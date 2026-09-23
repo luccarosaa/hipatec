@@ -27,7 +27,6 @@ public class RecuperacaoSenhaController {
     private record Janela(Instant inicio, int quantidade) {}
 
     public record Solicitacao(
-            @NotBlank @Pattern(regexp = "estudantes|mentoras") String perfil,
             @NotBlank @Email @Size(max = 254) String email) {}
 
     public record Redefinicao(
@@ -51,7 +50,7 @@ public class RecuperacaoSenhaController {
         limitar("solicitar:" + request.getRemoteAddr(), 5);
         try {
             // A consulta e o envio ocorrem fora da resposta HTTP, inclusive para e-mails desconhecidos.
-            service.solicitar(dados.perfil(), dados.email());
+            service.solicitar(dados.email());
         } catch (TaskRejectedException error) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Tente novamente mais tarde.");
         }

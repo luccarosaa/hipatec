@@ -32,6 +32,6 @@ public class RecuperacaoSenhaConfig implements AsyncConfigurer {
     public AsyncUncaughtExceptionHandler getAsyncUncaughtExceptionHandler() {
         // Não registrar argumentos, token ou exceções SMTP, que podem conter dados pessoais.
         return (error, method, args) -> LoggerFactory.getLogger(RecuperacaoSenhaConfig.class)
-                .error("Falha ao processar recuperação de senha. Verifique banco e configuração SMTP.");
+                .error("Falha ao processar recuperação de senha. Verifique banco e provedor de e-mail.");
     }
 }
